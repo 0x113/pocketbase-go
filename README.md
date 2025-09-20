@@ -321,14 +321,29 @@ The tests use `httptest.Server` to mock PocketBase responses and cover:
 - Query options
 - Thread safety
 
-## Example
+## Examples
 
-Check out [examples/main.go](examples/main.go) for a full example that shows all the features:
+The [examples](examples/) directory contains well-documented code examples that demonstrate different features:
 
-```bash
-cd examples
-go run main.go
-```
+- `common.go` - Shared utilities and client setup
+- `auth_example.go` - User authentication
+- `fetch_all_example.go` - Fetching all records from collections
+- `fetch_options_example.go` - Filtering, sorting, and expanding records
+- `fetch_single_example.go` - Fetching individual records
+- `error_handling_example.go` - Proper error handling
+- `multiple_collections_example.go` - Working with different collections
+- `superuser_example.go` - Superuser authentication and impersonation
+
+### Learning from Examples
+
+Each example file is self-contained and includes detailed comments explaining the functionality. To learn how to use the library:
+
+1. **Read the example files** - Each file demonstrates a specific aspect of the PocketBase Go client
+2. **Study the comments** - Detailed explanations are provided inline
+3. **Understand the patterns** - See how to handle authentication, errors, and data fetching
+4. **Adapt to your needs** - Use the patterns as templates for your own code
+
+The examples show real-world usage patterns including proper error handling, context management, and best practices for working with PocketBase collections.
 
 ## Requirements
 
