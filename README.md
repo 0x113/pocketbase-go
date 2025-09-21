@@ -11,6 +11,7 @@ A simple Go client for [PocketBase](https://pocketbase.io/) that handles the com
 
 - User and superuser authentication
 - Create new records in collections
+- Update existing records in collections
 - Fetch records from collections (with automatic pagination)
 - Query single records by ID
 - User impersonation for superusers
@@ -240,6 +241,38 @@ createdRecord, err := client.CreateRecord(ctx, "posts", recordData,
 )
 ```
 
+#### Update an existing record
+
+```go
+// Update a record by providing only the fields you want to change
+updateData := pocketbase.Record{
+    "title":   "Updated Post Title",
+    "content": "This post has been updated with new content",
+    "status":  "published",
+    "tags":    []string{"golang", "tutorial", "updated"},
+}
+
+updatedRecord, err := client.UpdateRecord(ctx, "posts", "RECORD_ID_HERE", updateData)
+if err != nil {
+    if apiErr, ok := err.(*pocketbase.APIError); ok {
+        if apiErr.IsBadRequest() {
+            fmt.Println("Validation error:", apiErr.Message)
+        }
+    }
+    log.Fatal(err)
+}
+fmt.Printf("Updated record: %s\n", updatedRecord["title"])
+```
+
+You can also expand relations and select specific fields when updating:
+
+```go
+updatedRecord, err := client.UpdateRecord(ctx, "posts", "RECORD_ID_HERE", updateData,
+    pocketbase.WithExpand("author", "category"),
+    pocketbase.WithFields("id", "title", "content", "author"),
+)
+```
+
 ### Records and errors
 
 Records are returned as `map[string]any`, so you can access any field:
@@ -339,7 +372,9 @@ if err != nil {
 
 ## Testing
 
-Run the tests:
+### Local Testing
+
+Run the tests locally:
 
 ```bash
 go test ./...
@@ -355,6 +390,23 @@ The tests use `httptest.Server` to mock PocketBase responses and cover:
 - Query options
 - Thread safety
 
+### Continuous Integration
+
+This project uses GitHub Actions for continuous integration:
+
+#### Automated Testing
+- **Triggers**: Runs on every push to `main` branch and every pull request targeting `main`
+- **Go versions**: Tests against Go 1.21.x and 1.22.x
+- **Coverage**: Generates and reports test coverage to Codecov
+- **Quality checks**: Includes formatting validation and `go vet`
+
+#### Manual Testing
+- **Trigger**: Can be manually triggered via GitHub Actions interface
+- **Custom Go version**: Allows specifying a custom Go version for testing
+- **Purpose**: Useful for testing other branches or specific Go versions
+
+The CI pipeline ensures code quality and compatibility across supported Go versions.
+
 ## Examples
 
 The [examples](examples/) directory contains well-documented code examples that demonstrate different features:
@@ -362,6 +414,7 @@ The [examples](examples/) directory contains well-documented code examples that 
 - `common.go` - Shared utilities and client setup
 - `auth_example.go` - User authentication
 - `create_record_example.go` - **Creating new records** in collections
+- `update_record_example.go` - **Updating existing records** in collections
 - `fetch_all_example.go` - Fetching all records from collections
 - `fetch_options_example.go` - Filtering, sorting, and expanding records
 - `fetch_single_example.go` - Fetching individual records
@@ -390,7 +443,7 @@ The examples show real-world usage patterns including proper error handling, con
 
 This covers the basic read and write operations. Future versions might add:
 
-- Updating and deleting records
+- Deleting records
 - File uploads
 - Real-time subscriptions
 - Admin API

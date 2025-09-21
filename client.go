@@ -346,6 +346,52 @@ func (c *Client) CreateRecord(ctx context.Context, collection string, record Rec
 	return createdRecord, nil
 }
 
+// UpdateRecord updates an existing record in the specified collection.
+// The record parameter should contain only the fields that need to be updated.
+// Fields like 'id', 'created', and 'updated' are automatically handled by PocketBase.
+//
+// Example:
+//
+//	// Update a post's title and status
+//	updateData := map[string]any{
+//		"title":  "Updated Post Title",
+//		"status": "published",
+//	}
+//
+//	updatedRecord, err := client.UpdateRecord(ctx, "posts", "RECORD_ID_HERE", updateData)
+//	if err != nil {
+//		return err
+//	}
+//	fmt.Printf("Updated record: %s", updatedRecord["title"])
+func (c *Client) UpdateRecord(ctx context.Context, collection, recordID string, record Record, opts ...QueryOption) (Record, error) {
+	options := &QueryOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	endpoint := fmt.Sprintf("/api/collections/%s/records/%s", collection, recordID)
+
+	// Build query parameters
+	params := url.Values{}
+	if len(options.Expand) > 0 {
+		params.Set("expand", strings.Join(options.Expand, ","))
+	}
+	if len(options.Fields) > 0 {
+		params.Set("fields", strings.Join(options.Fields, ","))
+	}
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
+
+	var updatedRecord Record
+	err := c.doRequest(ctx, "PATCH", endpoint, record, &updatedRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	return updatedRecord, nil
+}
+
 // doRequest is a helper method that handles HTTP requests to the PocketBase API.
 // It manages request construction, authentication headers, JSON encoding/decoding,
 // and error handling.

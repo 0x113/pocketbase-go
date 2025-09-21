@@ -1023,3 +1023,276 @@ func TestClient_CreateRecord_Unauthorized(t *testing.T) {
 		t.Error("Expected IsUnauthorized() to return true")
 	}
 }
+
+func TestClient_UpdateRecord_Success(t *testing.T) {
+	// Mock server that accepts record updates
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("Expected PATCH method, got %s", r.Method)
+		}
+
+		expectedPath := "/api/collections/posts/records/record-id-123"
+		if r.URL.Path != expectedPath {
+			t.Errorf("Expected path '%s', got '%s'", expectedPath, r.URL.Path)
+		}
+
+		// Check Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "test-token" {
+			t.Errorf("Expected Authorization header 'test-token', got '%s'", authHeader)
+		}
+
+		// Parse and verify request body
+		var record Record
+		if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+			t.Errorf("Failed to decode request body: %v", err)
+		}
+		if record["title"] != "Updated Title" {
+			t.Errorf("Expected title 'Updated Title', got '%v'", record["title"])
+		}
+		if record["status"] != "published" {
+			t.Errorf("Expected status 'published', got '%v'", record["status"])
+		}
+
+		// Send updated record response
+		updatedRecord := Record{
+			"id":      "record-id-123",
+			"title":   "Updated Title",
+			"status":  "published",
+			"content": "Original content",
+			"created": "2023-01-01T12:00:00Z",
+			"updated": "2023-01-02T12:00:00Z",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(updatedRecord)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetToken("test-token")
+
+	updateData := Record{
+		"title":  "Updated Title",
+		"status": "published",
+	}
+
+	updatedRecord, err := client.UpdateRecord(context.Background(), "posts", "record-id-123", updateData)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify updated record
+	if updatedRecord["id"] != "record-id-123" {
+		t.Errorf("Expected updated record ID 'record-id-123', got '%v'", updatedRecord["id"])
+	}
+	if updatedRecord["title"] != "Updated Title" {
+		t.Errorf("Expected updated record title 'Updated Title', got '%v'", updatedRecord["title"])
+	}
+	if updatedRecord["status"] != "published" {
+		t.Errorf("Expected updated record status 'published', got '%v'", updatedRecord["status"])
+	}
+	if updatedRecord["updated"] != "2023-01-02T12:00:00Z" {
+		t.Errorf("Expected updated timestamp, got '%v'", updatedRecord["updated"])
+	}
+}
+
+func TestClient_UpdateRecord_ValidationError(t *testing.T) {
+	// Mock server that returns validation error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+
+		response := apiErrorResp{
+			Status:  400,
+			Message: "An error occurred while validating the submitted data.",
+			Data: map[string]any{
+				"title": map[string]any{
+					"code":    "validation_required",
+					"message": "Missing required value.",
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetToken("test-token")
+
+	updateData := Record{
+		"status": "published", // Missing required title field
+	}
+
+	_, err := client.UpdateRecord(context.Background(), "posts", "record-id-123", updateData)
+
+	// Verify error is APIError
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("Expected APIError, got %T", err)
+	}
+
+	if apiErr.Status != 400 {
+		t.Errorf("Expected error status 400, got %d", apiErr.Status)
+	}
+	if apiErr.Message != "An error occurred while validating the submitted data." {
+		t.Errorf("Expected error message 'An error occurred while validating the submitted data.', got '%s'", apiErr.Message)
+	}
+	if !apiErr.IsBadRequest() {
+		t.Error("Expected IsBadRequest() to return true")
+	}
+}
+
+func TestClient_UpdateRecord_WithOptions(t *testing.T) {
+	// Mock server that verifies query parameters and returns updated record
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check query parameters
+		expand := r.URL.Query().Get("expand")
+		if expand != "author,category" {
+			t.Errorf("Expected expand parameter 'author,category', got '%s'", expand)
+		}
+
+		fields := r.URL.Query().Get("fields")
+		if fields != "id,title,content,author" {
+			t.Errorf("Expected fields parameter 'id,title,content,author', got '%s'", fields)
+		}
+
+		// Send updated record response with expanded relations
+		updatedRecord := Record{
+			"id":    "updated-with-options-456",
+			"title": "Updated with Options",
+			"expand": Record{
+				"author": Record{
+					"id":   "author-123",
+					"name": "Jane Smith",
+				},
+				"category": Record{
+					"id":   "category-456",
+					"name": "Technology",
+				},
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(updatedRecord)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetToken("test-token")
+
+	updateData := Record{
+		"title":  "Updated with Options",
+		"status": "published",
+	}
+
+	updatedRecord, err := client.UpdateRecord(context.Background(), "posts", "updated-with-options-456", updateData,
+		WithExpand("author", "category"),
+		WithFields("id", "title", "content", "author"))
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if updatedRecord["id"] != "updated-with-options-456" {
+		t.Errorf("Expected updated record ID 'updated-with-options-456', got '%v'", updatedRecord["id"])
+	}
+
+	// Verify expanded relations are included
+	if expandData, ok := updatedRecord["expand"]; ok {
+		expandMap, ok := expandData.(map[string]any)
+		if !ok {
+			t.Error("Expected expand data to be a map")
+		} else {
+			if author, ok := expandMap["author"]; ok {
+				authorMap, ok := author.(map[string]any)
+				if !ok {
+					t.Error("Expected author data to be a map")
+				} else {
+					if authorMap["name"] != "Jane Smith" {
+						t.Errorf("Expected expanded author name 'Jane Smith', got '%v'", authorMap["name"])
+					}
+				}
+			} else {
+				t.Error("Expected expanded author data to be present")
+			}
+		}
+	} else {
+		t.Error("Expected expand data to be present")
+	}
+}
+
+func TestClient_UpdateRecord_NotFound(t *testing.T) {
+	// Mock server that returns 404 not found
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+
+		response := apiErrorResp{
+			Status:  404,
+			Message: "The requested resource wasn't found.",
+			Data:    map[string]any{},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetToken("test-token")
+
+	updateData := Record{
+		"title": "Updated Title",
+	}
+
+	_, err := client.UpdateRecord(context.Background(), "posts", "nonexistent-id", updateData)
+
+	// Verify error is APIError
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("Expected APIError, got %T", err)
+	}
+
+	if apiErr.Status != 404 {
+		t.Errorf("Expected error status 404, got %d", apiErr.Status)
+	}
+	if !apiErr.IsNotFound() {
+		t.Error("Expected IsNotFound() to return true")
+	}
+}
+
+func TestClient_UpdateRecord_Unauthorized(t *testing.T) {
+	// Mock server that returns 401 unauthorized
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+
+		response := apiErrorResp{
+			Status:  401,
+			Message: "The request requires valid record authorization token to be set.",
+			Data:    map[string]any{},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	// Note: No token set for this test
+
+	updateData := Record{
+		"title": "Unauthorized Update",
+	}
+
+	_, err := client.UpdateRecord(context.Background(), "posts", "record-id-123", updateData)
+
+	// Verify error is APIError
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("Expected APIError, got %T", err)
+	}
+
+	if apiErr.Status != 401 {
+		t.Errorf("Expected error status 401, got %d", apiErr.Status)
+	}
+	if !apiErr.IsUnauthorized() {
+		t.Error("Expected IsUnauthorized() to return true")
+	}
+}
