@@ -2,13 +2,15 @@
 
 A simple Go client for [PocketBase](https://pocketbase.io/) that handles the common stuff you need - authentication, fetching records, and working with collections.
 
-[![Go Version](https://img.shields.io/badge/Go-%3E%3D%201.21-007d9c)](https://golang.org/)
-[![PocketBase](https://img.shields.io/badge/PocketBase-v0.20+-00d4aa)](https://pocketbase.io/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/0x113/pocketbase-go.svg)](https://pkg.go.dev/github.com/0x113/pocketbase-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/0x113/pocketbase-go)](https://goreportcard.com/report/github.com/0x113/pocketbase-go)
+[![PocketBase](https://img.shields.io/badge/PocketBase-v0.30+-00d4aa)](https://pocketbase.io/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## What it does
 
 - User and superuser authentication
+- Create new records in collections
 - Fetch records from collections (with automatic pagination)
 - Query single records by ID
 - User impersonation for superusers
@@ -206,9 +208,41 @@ post, err := client.GetRecord(ctx, "posts", "RECORD_ID_HERE",
 )
 ```
 
+#### Create a new record
+
+```go
+// Create a new record in a collection
+recordData := pocketbase.Record{
+    "title":   "My New Post",
+    "content": "This is the content of my new post",
+    "status":  "published",
+    "tags":    []string{"golang", "tutorial"},
+}
+
+createdRecord, err := client.CreateRecord(ctx, "posts", recordData)
+if err != nil {
+    if apiErr, ok := err.(*pocketbase.APIError); ok {
+        if apiErr.IsBadRequest() {
+            fmt.Println("Validation error:", apiErr.Message)
+        }
+    }
+    log.Fatal(err)
+}
+fmt.Printf("Created record with ID: %s\n", createdRecord["id"])
+```
+
+You can also expand relations and select specific fields when creating:
+
+```go
+createdRecord, err := client.CreateRecord(ctx, "posts", recordData,
+    pocketbase.WithExpand("author", "category"),
+    pocketbase.WithFields("id", "title", "content", "author"),
+)
+```
+
 ### Records and errors
 
-Records are returned as `map[string]interface{}`, so you can access any field:
+Records are returned as `map[string]any`, so you can access any field:
 
 ```go
 fmt.Printf("Title: %s\n", record["title"])
@@ -327,6 +361,7 @@ The [examples](examples/) directory contains well-documented code examples that 
 
 - `common.go` - Shared utilities and client setup
 - `auth_example.go` - User authentication
+- `create_record_example.go` - **Creating new records** in collections
 - `fetch_all_example.go` - Fetching all records from collections
 - `fetch_options_example.go` - Filtering, sorting, and expanding records
 - `fetch_single_example.go` - Fetching individual records
@@ -353,11 +388,11 @@ The examples show real-world usage patterns including proper error handling, con
 
 ## What's missing
 
-This covers the basic read operations. Future versions might add:
+This covers the basic read and write operations. Future versions might add:
 
-- Creating, updating, and deleting records
+- Updating and deleting records
 - File uploads
-- Real-time subscriptions  
+- Real-time subscriptions
 - Admin API
 - OAuth2 login
 

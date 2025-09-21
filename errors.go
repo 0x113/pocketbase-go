@@ -5,9 +5,9 @@ import "fmt"
 // APIError represents an error response from the PocketBase API.
 // It implements the error interface and provides structured error information.
 type APIError struct {
-	Status  int                    `json:"status"`
-	Message string                 `json:"message"`
-	Data    map[string]interface{} `json:"data"`
+	Status  int            `json:"status"`
+	Message string         `json:"message"`
+	Data    map[string]any `json:"data"`
 }
 
 // Error returns a formatted error string implementing the error interface.

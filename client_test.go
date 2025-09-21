@@ -136,7 +136,7 @@ func TestClient_AuthenticateWithPassword_Failure(t *testing.T) {
 		response := apiErrorResp{
 			Status:  400,
 			Message: "Failed to authenticate.",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"identity": map[string]string{
 					"code":    "validation_invalid_email",
 					"message": "Must be a valid email address.",
@@ -243,7 +243,7 @@ func TestClient_Impersonate_Success(t *testing.T) {
 		}
 
 		// Parse request body to check duration
-		var body map[string]interface{}
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("Failed to decode request body: %v", err)
 		}
@@ -297,7 +297,7 @@ func TestClient_Impersonate_Unauthorized(t *testing.T) {
 		response := apiErrorResp{
 			Status:  403,
 			Message: "The authorized record model is not allowed to perform this action.",
-			Data:    map[string]interface{}{},
+			Data:    map[string]any{},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -422,7 +422,7 @@ func TestClient_GetRecord_NotFound(t *testing.T) {
 		response := apiErrorResp{
 			Status:  404,
 			Message: "The requested resource wasn't found.",
-			Data:    map[string]interface{}{},
+			Data:    map[string]any{},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -572,7 +572,7 @@ func TestClient_GetAllRecords_Error(t *testing.T) {
 		response := apiErrorResp{
 			Status:  403,
 			Message: "You don't have access to this resource.",
-			Data:    map[string]interface{}{},
+			Data:    map[string]any{},
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -780,5 +780,246 @@ func TestGetAllRecords_WithListOptions(t *testing.T) {
 
 	if len(records) != 1 {
 		t.Errorf("Expected 1 record, got %d", len(records))
+	}
+}
+
+func TestClient_CreateRecord_Success(t *testing.T) {
+	// Mock server that accepts record creation
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("Expected POST method, got %s", r.Method)
+		}
+
+		expectedPath := "/api/collections/posts/records"
+		if r.URL.Path != expectedPath {
+			t.Errorf("Expected path '%s', got '%s'", expectedPath, r.URL.Path)
+		}
+
+		// Check Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "test-token" {
+			t.Errorf("Expected Authorization header 'test-token', got '%s'", authHeader)
+		}
+
+		// Parse and verify request body
+		var record Record
+		if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+			t.Errorf("Failed to decode request body: %v", err)
+		}
+		if record["title"] != "Test Post" {
+			t.Errorf("Expected title 'Test Post', got '%v'", record["title"])
+		}
+		if record["content"] != "This is test content" {
+			t.Errorf("Expected content 'This is test content', got '%v'", record["content"])
+		}
+
+		// Send created record response
+		createdRecord := Record{
+			"id":      "created-record-123",
+			"title":   "Test Post",
+			"content": "This is test content",
+			"created": "2023-01-01T12:00:00Z",
+			"updated": "2023-01-01T12:00:00Z",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(createdRecord)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetToken("test-token")
+
+	recordData := Record{
+		"title":   "Test Post",
+		"content": "This is test content",
+	}
+
+	createdRecord, err := client.CreateRecord(context.Background(), "posts", recordData)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify created record
+	if createdRecord["id"] != "created-record-123" {
+		t.Errorf("Expected created record ID 'created-record-123', got '%v'", createdRecord["id"])
+	}
+	if createdRecord["title"] != "Test Post" {
+		t.Errorf("Expected created record title 'Test Post', got '%v'", createdRecord["title"])
+	}
+	if createdRecord["content"] != "This is test content" {
+		t.Errorf("Expected created record content 'This is test content', got '%v'", createdRecord["content"])
+	}
+	if createdRecord["created"] != "2023-01-01T12:00:00Z" {
+		t.Errorf("Expected created timestamp, got '%v'", createdRecord["created"])
+	}
+}
+
+func TestClient_CreateRecord_ValidationError(t *testing.T) {
+	// Mock server that returns validation error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+
+		response := apiErrorResp{
+			Status:  400,
+			Message: "An error occurred while validating the submitted data.",
+			Data: map[string]any{
+				"title": map[string]any{
+					"code":    "validation_required",
+					"message": "Missing required value.",
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetToken("test-token")
+
+	recordData := Record{
+		"content": "Content without title",
+	}
+
+	_, err := client.CreateRecord(context.Background(), "posts", recordData)
+
+	// Verify error is APIError
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("Expected APIError, got %T", err)
+	}
+
+	if apiErr.Status != 400 {
+		t.Errorf("Expected error status 400, got %d", apiErr.Status)
+	}
+	if apiErr.Message != "An error occurred while validating the submitted data." {
+		t.Errorf("Expected error message 'An error occurred while validating the submitted data.', got '%s'", apiErr.Message)
+	}
+	if !apiErr.IsBadRequest() {
+		t.Error("Expected IsBadRequest() to return true")
+	}
+}
+
+func TestClient_CreateRecord_WithOptions(t *testing.T) {
+	// Mock server that verifies query parameters and returns created record
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check query parameters
+		expand := r.URL.Query().Get("expand")
+		if expand != "author,category" {
+			t.Errorf("Expected expand parameter 'author,category', got '%s'", expand)
+		}
+
+		fields := r.URL.Query().Get("fields")
+		if fields != "id,title,content,author" {
+			t.Errorf("Expected fields parameter 'id,title,content,author', got '%s'", fields)
+		}
+
+		// Parse request body to verify record data
+		var record Record
+		if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+			t.Errorf("Failed to decode request body: %v", err)
+		}
+
+		// Send created record response with expanded relations
+		createdRecord := Record{
+			"id":      "created-with-options-456",
+			"title":   "Post with Options",
+			"content": "Content with options",
+			"expand": Record{
+				"author": Record{
+					"id":   "author-123",
+					"name": "John Doe",
+				},
+				"category": Record{
+					"id":   "category-456",
+					"name": "Technology",
+				},
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(createdRecord)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetToken("test-token")
+
+	recordData := Record{
+		"title":   "Post with Options",
+		"content": "Content with options",
+	}
+
+	createdRecord, err := client.CreateRecord(context.Background(), "posts", recordData,
+		WithExpand("author", "category"),
+		WithFields("id", "title", "content", "author"))
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if createdRecord["id"] != "created-with-options-456" {
+		t.Errorf("Expected created record ID 'created-with-options-456', got '%v'", createdRecord["id"])
+	}
+
+	// Verify expanded relations are included
+	if expandData, ok := createdRecord["expand"]; ok {
+		expandMap, ok := expandData.(map[string]any)
+		if !ok {
+			t.Error("Expected expand data to be a map")
+		} else {
+			if author, ok := expandMap["author"]; ok {
+				authorMap, ok := author.(map[string]any)
+				if !ok {
+					t.Error("Expected author data to be a map")
+				} else {
+					if authorMap["name"] != "John Doe" {
+						t.Errorf("Expected expanded author name 'John Doe', got '%v'", authorMap["name"])
+					}
+				}
+			} else {
+				t.Error("Expected expanded author data to be present")
+			}
+		}
+	} else {
+		t.Error("Expected expand data to be present")
+	}
+}
+
+func TestClient_CreateRecord_Unauthorized(t *testing.T) {
+	// Mock server that returns 401 unauthorized
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+
+		response := apiErrorResp{
+			Status:  401,
+			Message: "The request requires valid record authorization token to be set.",
+			Data:    map[string]any{},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	// Note: No token set for this test
+
+	recordData := Record{
+		"title": "Unauthorized Post",
+	}
+
+	_, err := client.CreateRecord(context.Background(), "posts", recordData)
+
+	// Verify error is APIError
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("Expected APIError, got %T", err)
+	}
+
+	if apiErr.Status != 401 {
+		t.Errorf("Expected error status 401, got %d", apiErr.Status)
+	}
+	if !apiErr.IsUnauthorized() {
+		t.Error("Expected IsUnauthorized() to return true")
 	}
 }

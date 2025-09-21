@@ -2,7 +2,7 @@ package pocketbase
 
 // Record represents a generic PocketBase record as a map of field names to values.
 // This flexible structure allows handling different collection schemas dynamically.
-type Record map[string]interface{}
+type Record map[string]any
 
 // authResp represents the response structure from the auth-with-password endpoint.
 type authResp struct {
@@ -21,9 +21,9 @@ type listResp struct {
 
 // apiErrorResp represents the error response structure from PocketBase API.
 type apiErrorResp struct {
-	Status  int                    `json:"status"`
-	Message string                 `json:"message"`
-	Data    map[string]interface{} `json:"data"`
+	Status  int            `json:"status"`
+	Message string         `json:"message"`
+	Data    map[string]any `json:"data"`
 }
 
 // impersonateResp represents the response structure from the impersonate endpoint.
