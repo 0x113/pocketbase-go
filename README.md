@@ -12,6 +12,7 @@ A simple Go client for [PocketBase](https://pocketbase.io/) that handles the com
 - User and superuser authentication
 - Create new records in collections
 - Update existing records in collections
+- File uploads with records (single and multiple files)
 - Fetch records from collections (with automatic pagination)
 - Query single records by ID
 - User impersonation for superusers
@@ -273,6 +274,141 @@ updatedRecord, err := client.UpdateRecord(ctx, "posts", "RECORD_ID_HERE", update
 )
 ```
 
+### File uploads
+
+The library supports uploading files to PocketBase collections with file fields.
+
+#### Create a record with file uploads
+
+```go
+// Open files
+file1, err := os.Open("document.pdf")
+if err != nil {
+    log.Fatal(err)
+}
+defer file1.Close()
+
+file2, err := os.Open("image.jpg")
+if err != nil {
+    log.Fatal(err)
+}
+defer file2.Close()
+
+// Prepare files for upload
+files := []pocketbase.FileData{
+    {Reader: file1, Filename: "document.pdf"},
+    {Reader: file2, Filename: "image.jpg"},
+}
+
+// Prepare record data
+data := pocketbase.Record{
+    "title":       "Important Document",
+    "description": "This document contains important information",
+}
+
+// Create record with files
+createdRecord, err := client.CreateRecordWithFiles(ctx, "documents",
+    pocketbase.WithFormData(data),
+    pocketbase.WithFileUpload("files", files))
+
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Created record with files: %s\n", createdRecord["id"])
+```
+
+#### Update a record with file uploads
+
+Replace existing files:
+
+```go
+newFile, err := os.Open("new-avatar.jpg")
+if err != nil {
+    log.Fatal(err)
+}
+defer newFile.Close()
+
+files := []pocketbase.FileData{
+    {Reader: newFile, Filename: "new-avatar.jpg"},
+}
+
+data := pocketbase.Record{
+    "name": "Updated User",
+}
+
+updatedRecord, err := client.UpdateRecordWithFiles(ctx, "users", "RECORD_ID",
+    pocketbase.WithFormData(data),
+    pocketbase.WithFileUpload("avatar", files))
+```
+
+Append files to existing ones:
+
+```go
+newFile, err := os.Open("document3.pdf")
+if err != nil {
+    log.Fatal(err)
+}
+defer newFile.Close()
+
+files := []pocketbase.FileData{
+    {Reader: newFile, Filename: "document3.pdf"},
+}
+
+updatedRecord, err := client.UpdateRecordWithFiles(ctx, "documents", "RECORD_ID",
+    pocketbase.WithFileUpload("files", files, pocketbase.WithAppend()))
+```
+
+Delete specific files:
+
+```go
+updatedRecord, err := client.UpdateRecordWithFiles(ctx, "documents", "RECORD_ID",
+    pocketbase.WithFileUpload("files", nil, 
+        pocketbase.WithDelete("old-file1.pdf", "old-file2.pdf")))
+```
+
+#### File upload helper functions
+
+The library provides several helper functions to create `FileData`:
+
+```go
+// From an io.Reader
+fileData := pocketbase.CreateFileData(reader, "filename.txt")
+
+// From byte data
+content := []byte("Hello, World!")
+fileData := pocketbase.CreateFileDataFromBytes(content, "hello.txt")
+
+// From file path (caller must close the file)
+fileData, err := pocketbase.CreateFileDataFromFile("path/to/file.pdf")
+if err != nil {
+    log.Fatal(err)
+}
+// Don't forget to close the file when done
+if fileReader, ok := fileData.Reader.(*os.File); ok {
+    defer fileReader.Close()
+}
+
+// Use in upload
+createdRecord, err := client.CreateRecordWithFiles(ctx, "documents",
+    pocketbase.WithFormData(data),
+    pocketbase.WithFileUpload("file", []pocketbase.FileData{fileData}))
+```
+
+#### File upload with query options
+
+You can use expand and fields options with file uploads:
+
+```go
+// Upload with expanded relations
+createdRecord, err := client.CreateRecordWithFiles(ctx, "documents",
+    pocketbase.WithFormData(data),
+    pocketbase.WithFileUpload("files", files),
+    func(opts *pocketbase.FileUploadOptions) {
+        opts.Expand = []string{"author", "category"}
+        opts.Fields = []string{"id", "title", "files", "author"}
+    })
+```
+
 ### Records and errors
 
 Records are returned as `map[string]any`, so you can access any field:
@@ -415,6 +551,7 @@ The [examples](examples/) directory contains well-documented code examples that 
 - `auth_example.go` - User authentication
 - `create_record_example.go` - **Creating new records** in collections
 - `update_record_example.go` - **Updating existing records** in collections
+- `file_upload_example.go` - **Uploading files** with records
 - `fetch_all_example.go` - Fetching all records from collections
 - `fetch_options_example.go` - Filtering, sorting, and expanding records
 - `fetch_single_example.go` - Fetching individual records
@@ -444,7 +581,6 @@ The examples show real-world usage patterns including proper error handling, con
 This covers the basic read and write operations. Future versions might add:
 
 - Deleting records
-- File uploads
 - Real-time subscriptions
 - Admin API
 - OAuth2 login

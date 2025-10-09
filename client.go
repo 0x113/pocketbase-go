@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -396,6 +398,11 @@ func (c *Client) UpdateRecord(ctx context.Context, collection, recordID string, 
 // It manages request construction, authentication headers, JSON encoding/decoding,
 // and error handling.
 func (c *Client) doRequest(ctx context.Context, method, endpoint string, body any, out any) error {
+	// Check if this is a file upload request
+	if fileUploads, ok := body.(*FileUploadOptions); ok {
+		return c.doMultipartRequest(ctx, method, endpoint, fileUploads, out)
+	}
+
 	url := c.BaseURL + endpoint
 
 	var reqBody []byte
@@ -429,6 +436,139 @@ func (c *Client) doRequest(ctx context.Context, method, endpoint string, body an
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Handle non-2xx responses
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiErr apiErrorResp
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+			// If we can't decode the error response, create a generic API error
+			return &APIError{
+				Status:  resp.StatusCode,
+				Message: resp.Status,
+				Data:    nil,
+			}
+		}
+		return &APIError{
+			Status:  apiErr.Status,
+			Message: apiErr.Message,
+			Data:    apiErr.Data,
+		}
+	}
+
+	// Decode successful response
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// doMultipartRequest handles multipart/form-data requests for file uploads
+func (c *Client) doMultipartRequest(ctx context.Context, method, endpoint string, fileUploads *FileUploadOptions, out any) error {
+	fullURL := c.BaseURL + endpoint
+
+	// Parse query parameters from options
+	params := url.Values{}
+	if len(fileUploads.Expand) > 0 {
+		params.Set("expand", strings.Join(fileUploads.Expand, ","))
+	}
+	if len(fileUploads.Fields) > 0 {
+		params.Set("fields", strings.Join(fileUploads.Fields, ","))
+	}
+	if len(params) > 0 {
+		fullURL += "?" + params.Encode()
+	}
+
+	// Create multipart writer
+	var reqBody bytes.Buffer
+	writer := multipart.NewWriter(&reqBody)
+
+	// Add regular form data fields
+	if fileUploads.Data != nil {
+		for key, value := range fileUploads.Data {
+			// Convert value to string for form field
+			var strValue string
+			switch v := value.(type) {
+			case string:
+				strValue = v
+			case int, int32, int64, float32, float64, bool:
+				strValue = fmt.Sprintf("%v", v)
+			default:
+				// For complex types, marshal to JSON
+				jsonBytes, err := json.Marshal(v)
+				if err != nil {
+					return fmt.Errorf("failed to marshal form field %s: %w", key, err)
+				}
+				strValue = string(jsonBytes)
+			}
+			if err := writer.WriteField(key, strValue); err != nil {
+				return fmt.Errorf("failed to write form field %s: %w", key, err)
+			}
+		}
+	}
+
+	// Add files to the multipart form
+	for _, upload := range fileUploads.Uploads {
+		fieldName := upload.Field
+
+		// Handle delete operations (fieldname-)
+		if len(upload.Delete) > 0 {
+			deleteFieldName := fieldName + "-"
+			for _, filename := range upload.Delete {
+				if err := writer.WriteField(deleteFieldName, filename); err != nil {
+					return fmt.Errorf("failed to write delete field: %w", err)
+				}
+			}
+		}
+
+		// Handle append operations (fieldname+)
+		if upload.Append {
+			fieldName += "+"
+		}
+
+		// Add files
+		for _, file := range upload.Files {
+			part, err := writer.CreateFormFile(fieldName, file.Filename)
+			if err != nil {
+				return fmt.Errorf("failed to create form file: %w", err)
+			}
+
+			_, err = io.Copy(part, file.Reader)
+			if err != nil {
+				return fmt.Errorf("failed to copy file data: %w", err)
+			}
+		}
+	}
+
+	err := writer.Close()
+	if err != nil {
+		return fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, &reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to create multipart request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.userAgent)
+
+	// Add authorization header if token is available
+	if token := c.GetToken(); token != "" {
+		req.Header.Set("Authorization", token)
+	}
+
+	// Execute request
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute multipart request: %w", err)
 	}
 	defer resp.Body.Close()
 

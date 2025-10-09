@@ -1,8 +1,75 @@
 package pocketbase
 
+import "io"
+
 // Record represents a generic PocketBase record as a map of field names to values.
 // This flexible structure allows handling different collection schemas dynamically.
 type Record map[string]any
+
+// FileData represents a file to be uploaded with optional metadata
+type FileData struct {
+	Reader   io.Reader
+	Filename string
+	Size     int64
+}
+
+// FileUpload represents file upload configuration for a field
+type FileUpload struct {
+	Field  string
+	Files  []FileData
+	Append bool     // If true, appends to existing files (fieldname+)
+	Delete []string // Filenames to delete (used with fieldname-)
+}
+
+// FileUploadOption represents functional options for file upload operations.
+type FileUploadOption func(*FileUploadOptions)
+
+// FileUploadOptions holds options for file upload requests.
+type FileUploadOptions struct {
+	Uploads []FileUpload
+	Data    Record // Regular form data to include with the upload
+	QueryOptions
+}
+
+// WithFileUpload adds a file upload configuration to the request.
+func WithFileUpload(field string, files []FileData, options ...FileUploadModifier) FileUploadOption {
+	return func(opts *FileUploadOptions) {
+		upload := FileUpload{
+			Field: field,
+			Files: files,
+		}
+
+		for _, option := range options {
+			option(&upload)
+		}
+
+		opts.Uploads = append(opts.Uploads, upload)
+	}
+}
+
+// WithFormData adds regular form data to include with file uploads.
+func WithFormData(data Record) FileUploadOption {
+	return func(opts *FileUploadOptions) {
+		opts.Data = data
+	}
+}
+
+// FileUploadModifier represents functional options for individual file uploads.
+type FileUploadModifier func(*FileUpload)
+
+// WithAppend sets the file upload to append mode (fieldname+).
+func WithAppend() FileUploadModifier {
+	return func(upload *FileUpload) {
+		upload.Append = true
+	}
+}
+
+// WithDelete sets filenames to delete from the field (fieldname-).
+func WithDelete(filenames ...string) FileUploadModifier {
+	return func(upload *FileUpload) {
+		upload.Delete = filenames
+	}
+}
 
 // authResp represents the response structure from the auth-with-password endpoint.
 type authResp struct {
